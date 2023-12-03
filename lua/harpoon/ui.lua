@@ -62,7 +62,7 @@ function HarpoonUI:_create_window()
     if #win > 0 then
         -- no ackshual reason for 0.62569, just looks complicated, and i want
         -- to make my boss think i am smart
-        width = math.floor(win[1].width * 0.62569)
+        width = math.floor(win[1].width * 0.32569)
     end
 
     local height = 8
