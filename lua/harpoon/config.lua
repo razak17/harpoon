@@ -1,3 +1,5 @@
+local Extensions = require("harpoon.extensions")
+local Logger = require("harpoon.logger")
 local Path = require("plenary.path")
 local function normalize_path(buf_name, root)
     return Path:new(buf_name):make_relative(root)
@@ -9,26 +11,28 @@ M.DEFAULT_LIST = DEFAULT_LIST
 
 ---@alias HarpoonListItem {value: any, context: any}
 ---@alias HarpoonListFileItem {value: string, context: {row: number, col: number}}
----@alias HarpoonListFileOptions {split: boolean, vsplit: boolean}
+---@alias HarpoonListFileOptions {split: boolean, vsplit: boolean, tabedit: boolean}
 
 ---@class HarpoonPartialConfigItem
 ---@field select_with_nil? boolean defaults to false
----@field encode? (fun(list_item: HarpoonListItem): string)
+---@field encode? (fun(list_item: HarpoonListItem): string) | boolean
 ---@field decode? (fun(obj: string): any)
 ---@field display? (fun(list_item: HarpoonListItem): string)
 ---@field select? (fun(list_item?: HarpoonListItem, list: HarpoonList, options: any?): nil)
 ---@field equals? (fun(list_line_a: HarpoonListItem, list_line_b: HarpoonListItem): boolean)
----@field add? fun(config: HarpoonPartialConfigItem, item: any?): HarpoonListItem
+---@field create_list_item? fun(config: HarpoonPartialConfigItem, item: any?): HarpoonListItem
 ---@field BufLeave? fun(evt: any, list: HarpoonList): nil
 ---@field VimLeavePre? fun(evt: any, list: HarpoonList): nil
 ---@field get_root_dir? fun(): string
 
 ---@class HarpoonSettings
----@field save_on_toggle boolean defaults to true
+---@field save_on_toggle boolean defaults to false
+---@field sync_on_ui_close? boolean
 ---@field key (fun(): string)
 
 ---@class HarpoonPartialSettings
 ---@field save_on_toggle? boolean
+---@field sync_on_ui_close? boolean
 ---@field key? (fun(): string)
 
 ---@class HarpoonConfig
@@ -52,12 +56,14 @@ function M.get_default_config()
 
         settings = {
             save_on_toggle = false,
+            sync_on_ui_close = false,
             key = function()
                 return vim.loop.cwd()
             end,
         },
 
         default = {
+
             --- select_with_nill allows for a list to call select even if the provided item is nil
             select_with_nil = false,
 
@@ -78,11 +84,18 @@ function M.get_default_config()
                 return list_item.value
             end,
 
-            --- the select function is called when a user selects an item from the corresponding list and can be nil if select_with_nil is true
+            --- the select function is called when a user selects an item from
+            --- the corresponding list and can be nil if select_with_nil is true
             ---@param list_item? HarpoonListFileItem
             ---@param list HarpoonList
             ---@param options HarpoonListFileOptions
             select = function(list_item, list, options)
+                Logger:log(
+                    "config_default#select",
+                    list_item,
+                    list.name,
+                    options
+                )
                 options = options or {}
                 if list_item == nil then
                     return
@@ -94,16 +107,22 @@ function M.get_default_config()
                     set_position = true
                     bufnr = vim.fn.bufnr(list_item.value, true)
                 end
+                if not vim.api.nvim_buf_is_loaded(bufnr) then
+                    vim.fn.bufload(bufnr)
+                    vim.api.nvim_set_option_value("buflisted", true, {
+                        buf = bufnr,
+                    })
+                end
 
                 if options.vsplit then
                     vim.cmd("vsplit")
-                    vim.api.nvim_set_current_buf(bufnr)
                 elseif options.split then
                     vim.cmd("split")
-                    vim.api.nvim_set_current_buf(bufnr)
-                else
-                    vim.api.nvim_set_current_buf(bufnr)
+                elseif options.tabedit then
+                    vim.cmd("tabedit")
                 end
+
+                vim.api.nvim_set_current_buf(bufnr)
 
                 if set_position then
                     vim.api.nvim_win_set_cursor(0, {
@@ -111,6 +130,10 @@ function M.get_default_config()
                         list_item.context.col or 0,
                     })
                 end
+
+                Extensions.extensions:emit(Extensions.event_names.NAVIGATE, {
+                    buffer = bufnr,
+                })
             end,
 
             ---@param list_item_a HarpoonListItem
@@ -126,7 +149,7 @@ function M.get_default_config()
             ---@param config HarpoonPartialConfigItem
             ---@param name? any
             ---@return HarpoonListItem
-            add = function(config, name)
+            create_list_item = function(config, name)
                 name = name
                     -- TODO: should we do path normalization???
                     -- i know i have seen sometimes it becoming an absolute
@@ -139,6 +162,8 @@ function M.get_default_config()
                         ),
                         config.get_root_dir()
                     )
+
+                Logger:log("config_default#create_list_item", name)
 
                 local bufnr = vim.fn.bufnr(name, false)
 
@@ -163,6 +188,16 @@ function M.get_default_config()
 
                 if item then
                     local pos = vim.api.nvim_win_get_cursor(0)
+
+                    Logger:log(
+                        "config_default#BufLeave updating position",
+                        bufnr,
+                        bufname,
+                        item,
+                        "to position",
+                        pos
+                    )
+
                     item.context.row = pos[1]
                     item.context.col = pos[2]
                 end
