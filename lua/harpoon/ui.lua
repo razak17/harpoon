@@ -87,11 +87,7 @@ function HarpoonUI:_create_window(toggle_opts)
     if #win > 0 then
         -- no ackshual reason for 0.62569, just looks complicated, and i want
         -- to make my boss think i am smart
-        width = math.floor(win[1].width * toggle_opts.ui_width_ratio)
-    end
-
-    if toggle_opts.ui_max_width and width > toggle_opts.ui_max_width then
-        width = toggle_opts.ui_max_width
+        width = math.floor(win[1].width * 0.32569)
     end
 
     local height = 8
